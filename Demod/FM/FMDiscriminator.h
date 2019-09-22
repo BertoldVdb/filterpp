@@ -19,18 +19,30 @@ public:
 	FMDiscriminator(){
 	}
 
-	inline void processBuffer(InType* I, InType* Q, InType* out, unsigned int numSamples){
+	inline void processBuffer(InType* I, InType* Q, InType* out, unsigned int numSamples, unsigned int inInc = 1){
+		unsigned int inCnt = 0;
+
 		for(unsigned int k=0; k<numSamples; k++){
-			WorkType i = I[k];
-			WorkType q = Q[k];
+			WorkType i = I[inCnt];
+			WorkType q = Q[inCnt];
+			inCnt += inInc;
 
 			if(type == FM_DISC_ATAN){
 				float at = std::atan2(i, q) / M_PI;
 				float ato = at-oldAt;
+
 				if(ato < -1){
 					ato += 2;
 				}
-				*out = ato * (float)(1<<(sizeof(InType)*8));
+				if(ato > 1){
+					ato -= 2;
+				}
+
+				if (!std::is_floating_point<InType>::value) {
+					*out = ato * (float)(1UL<<(sizeof(InType)*8));
+				}else{
+					*out = ato;
+				}
 				oldAt = at;
 
 			}

@@ -1,6 +1,7 @@
 #ifndef FILTER_CIC_CIC_H_
 #define FILTER_CIC_CIC_H_
 
+#include <iostream>
 #include "IntComb.h"
 #include <array>
 #include <cmath>
@@ -15,9 +16,10 @@ template <typename inType, typename outType, typename internalType = int32_t, un
 public:
     CIC() {}
 
-    CIC(unsigned int order, unsigned int rate):
+    CIC(unsigned int order, unsigned int rate, internalType internalGain = 1):
         order_(order),
-        rate_(rate)
+        rate_(rate),
+		internalGain_(internalGain)
     {
         gain_ = 1;
         for(unsigned int i=0; i<order; i++) {
@@ -30,26 +32,30 @@ public:
         return gain_;
     }
 
-    float getGain(float outputFrequency)
+    double getGain(double outputFrequency)
     {
         if(outputFrequency == 0) {
             return 1;
         }
 
-        float tmp = sinf(M_PI * outputFrequency);
-        tmp /= sinf(M_PI/rate_ * outputFrequency);
+        double tmp = std::sin(M_PI * (double)rate_ * outputFrequency);
+        tmp /= std::sin(M_PI * outputFrequency);
         tmp /= rate_;
-        tmp = fabsf(tmp);
+        tmp = std::abs(tmp);
+        auto a = std::pow(tmp, order_);
 
-        return powf(tmp, order_);
+        return a;
     }
 
-    unsigned int filter(inType* samplesIn, unsigned int numSamples, outType* samplesOut)
+    size_t filter(inType* samplesIn, size_t numSamples, outType* samplesOut, unsigned int incIn = 1, unsigned int incOut = 1)
     {
-        unsigned int numOut = 0;
+    	size_t numOut = 0;
+    	size_t cntIn = 0;
+    	size_t cntOut = 0;
 
-        for(unsigned int i=0; i<numSamples; i++) {
-            internalType sample = samplesIn[i];
+        for(size_t i=0; i<numSamples; i++) {
+            internalType sample = samplesIn[cntIn] * internalGain_;
+            cntIn+=incIn;
 
             /* Run integrator stages */
             for(unsigned int j=0; j<order_; j++) {
@@ -65,17 +71,30 @@ public:
                     sample = comb_[j].update(sample);
                 }
 
-                samplesOut[numOut] = sample;
+                samplesOut[cntOut] = sample;
+                cntOut+=incOut;
                 numOut++;
             }
         }
         return numOut;
     }
 
+    void reset(){
+    	for(auto& i: int_){
+    		i.reset();
+    	}
+    	for(auto& i: comb_){
+			i.reset();
+		}
+
+    	outIndex_ = 0;
+    }
+
 private:
     unsigned int order_ = 0, rate_ = 1, outIndex_ = 0;
 
     internalType gain_;
+    inType internalGain_;
 
     std::array<Integrator<internalType>, maxOrder> int_;
     std::array<Comb<internalType>, maxOrder> comb_;

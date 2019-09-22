@@ -3,14 +3,15 @@
 
 #include "../CIC/CIC.h"
 #include "../FIR/FIRDesign.h"
-#include "../FIR/RationalFIRFilter.h"
 #include "../FIR/FractionalFIRFilter.h"
+#include "../Util/Math.h"
 
 #include "Resampler.h"
 
 #include <iostream>
 #include <functional>
 #include <stdexcept>
+#include <memory>
 
 #ifndef FILTER_RESAMPLER_DOWNSAMPLER_H_
 #define FILTER_RESAMPLER_DOWNSAMPLER_H_
@@ -20,19 +21,12 @@ namespace Filter
 namespace Resampler
 {
 
-int gcd(unsigned int v1, unsigned int v2);
-
-
-template <typename inT, typename outT, typename cicInternalType = int32_t> class Downsampler
+template <typename inT, typename outT, typename cicInternalType = int32_t, typename internalT = float> class Downsampler
 {
 public:
-    Downsampler(ResamplerConfig cfg, unsigned int maxBlockLength = 256*1024):
+    Downsampler(ResamplerConfig<internalT>& cfg):
         cfg_(cfg)
     {
-
-        /* Create working buffer */
-        samplesCIC_ = new float[maxBlockLength];
-
         /*
         * The CIC filter makes half band filters, so we use it
         * to get the rate to 2-4x of the output rate
@@ -48,13 +42,15 @@ public:
             cfg_.cicOrder = 0;
         }
 
-        float firInputRate = cfg.inputRate / cicD;
-
+        double firInputRate = cfg.inputRate / cicD;
 
         /* Create CIC core */
-        cic_ = CIC::CIC<inT, float, cicInternalType>(cfg_.cicOrder, cicD);
-        std::function<float(float)> cicGainFunc = [this](float f) {
-            return 1.0f/cic_.getGain(f);
+        cic_ = CIC::CIC<inT, internalT, cicInternalType>(cfg_.cicOrder, cicD, cfg_.cicBoost);
+        std::function<double(double)> cicGainFunc = [this](double f) {
+        	/* Convert the frequency to a fraction of the input rate */
+        	f /= cfg_.inputRate;
+
+        	return 1.0/cic_.getGain(f)/cic_.getGrowth()/cfg_.cicBoost;
         };
         actualOutputRate_ = cfg_.inputRate / (float)cicD;
 
@@ -63,12 +59,15 @@ public:
             cicGainFunc = nullptr;
         }
 
+        unsigned long interpolation;
+        double decimation;
+
         if(cfg_.rational) {
-            unsigned int interpolation = cfg_.outputRate;
-            unsigned int decimation = firInputRate;
+            interpolation = cfg_.outputRate;
+            decimation = firInputRate;
 
             /* Reduce fraction */
-            unsigned int d = gcd(decimation, interpolation);
+            unsigned long d = Util::gcd((unsigned long)decimation, interpolation);
             decimation /= d;
             interpolation /= d;
 
@@ -79,87 +78,60 @@ public:
             actualOutputRate_*= interpolation;
             actualOutputRate_/= decimation;
 
-            /* Create FIR core */
-            auto taps = FIR::Design::buildFIRFilter(actualOutputRate_ * cfg_.cutoffFraction,
-                                                    actualOutputRate_ * cfg_.transitionWidthFraction,
-                                                    firInputRate * interpolation,
-                                                    cfg_.desiredRipple,
-                                                    cicGainFunc);
-
-            for(auto& tap: taps) {
-                tap *= interpolation;
-            }
-
-            rationalFir_ = FIR::RationalFIR<float, float, outT>(taps, interpolation, decimation);
-        } else {
-            unsigned int interpolation = cfg_.maxInterpolation;
-            float decimation = firInputRate * interpolation / cfg_.outputRate;
+        }else{
+            interpolation = cfg_.maxInterpolation;
+            decimation = firInputRate * interpolation / cfg_.outputRate;
 
             actualOutputRate_*= interpolation;
             actualOutputRate_/= decimation;
 
-            /* Create FIR core */
-            auto taps = FIR::Design::buildFIRFilter(actualOutputRate_ * cfg_.cutoffFraction,
-                                                    actualOutputRate_ * cfg_.transitionWidthFraction,
-                                                    firInputRate * interpolation,
-                                                    cfg_.desiredRipple,
-                                                    cicGainFunc);
-
-            for(auto& tap: taps) {
-                tap *= interpolation;
-            }
-
-            fractionalFir_ = FIR::FrationalFIR<float, float, outT>(taps, interpolation, decimation);
         }
+
+		if(!cfg.taps){
+			/* Create FIR core */
+			auto taps = FIR::Design::buildFIRFilter(cfg_.cutoffFrequency,
+													cfg_.transitionWidth,
+													firInputRate * interpolation,
+													cfg_.desiredRipple,
+													cicGainFunc);
+
+			for(auto& tap: taps) {
+				tap *= interpolation;
+			}
+			cfg.taps = FIR::Design::convertTapsForFilter<internalT>(taps, true, interpolation);
+		}
+
+		fractionalFir_ = FIR::FractionalFIR<internalT, internalT, outT>(cfg.taps, cfg.filterInterpolate, interpolation, decimation);
     }
 
-    unsigned int filter(inT* samplesIn, unsigned int numSamples, outT* samplesOut)
+    size_t filter(inT* samplesIn, size_t numSamples, outT* samplesOut, unsigned int incIn = 1, unsigned int incOut = 1)
     {
-        unsigned int samplesAfterCIC;
-
         if(cicR_ != 1) {
-            samplesAfterCIC = cic_.filter(samplesIn, numSamples, samplesCIC_);
+        	internalT samplesCIC[numSamples/cicR_+1];
+            auto samplesAfterCIC = cic_.filter(samplesIn, numSamples, samplesCIC, incIn, 1);
 
-            auto growth = cic_.getGrowth();
-
-            for(unsigned int i=0; i<samplesAfterCIC; i++) {
-                samplesCIC_[i] /= growth;
-            }
+            return fractionalFir_.filter(samplesCIC, samplesAfterCIC, samplesOut, 1, incOut);
         } else {
-            samplesAfterCIC = numSamples;
-            for(unsigned int i=0; i<numSamples; i++) {
-                samplesCIC_[i] = samplesIn[i];
-            }
-        }
-
-        if(cfg_.rational) {
-            return rationalFir_.filter(samplesCIC_, samplesAfterCIC, samplesOut);
-        } else {
-            return fractionalFir_.filter(samplesCIC_, samplesAfterCIC, samplesOut);
+            return fractionalFir_.filter(samplesIn, numSamples, samplesOut, incIn, incOut);
         }
     }
 
-    float getActualOutputRate()
+    double getActualOutputRate()
     {
         return actualOutputRate_;
     }
 
-    ~Downsampler()
-    {
-        delete samplesCIC_;
+    void reset(){
+    	cic_.reset();
+    	fractionalFir_.reset();
     }
 
 private:
-    CIC::CIC<inT, float, cicInternalType> cic_;
+    CIC::CIC<inT, internalT, cicInternalType> cic_;
+    FIR::FractionalFIR<internalT, internalT, outT> fractionalFir_;
 
-    /* C++ does not support templated virtual functions :( */
-    FIR::RationalFIR<float, float, outT> rationalFir_;
-    FIR::FrationalFIR<float, float, outT> fractionalFir_;
-
-    ResamplerConfig cfg_;
-    float actualOutputRate_;
-
-    float* samplesCIC_;
+    ResamplerConfig<internalT> cfg_;
+    double actualOutputRate_;
 
     unsigned int cicR_ = 1;
 };

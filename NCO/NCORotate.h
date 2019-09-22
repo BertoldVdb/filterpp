@@ -1,10 +1,3 @@
-/*
- * NCO.h
- *
- *  Created on: Aug 17, 2019
- *      Author: bertold
- */
-
 #ifndef NCOROTATE_H_
 #define NCOROTATE_H_
 

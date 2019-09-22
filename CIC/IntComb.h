@@ -15,6 +15,10 @@ public:
         value_ = in;
         return out;
     }
+
+    void reset(){
+		value_ = 0;
+	}
 private:
     T value_ = 0;
 };
@@ -27,6 +31,10 @@ public:
         T out = in + value_;
         value_ = out;
         return out;
+    }
+
+    void reset(){
+    	value_ = 0;
     }
 private:
     T value_ = 0;

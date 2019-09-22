@@ -9,9 +9,9 @@
 
 namespace NCO {
 
-template <typename outType = float, typename phaseAccType = uint32_t, int gain = 1, int phaseBits = 8> class NCOTable {
+template <int phaseBits = 8, typename outType = float, typename phaseAccType = uint32_t, int gain = 1> class NCOTable {
 public:
-	NCOTable(unsigned long sampleRate = 1, int ditherShift = -1):
+	NCOTable(float sampleRate = 1, int ditherShift = -1):
 			sampleRate_(sampleRate),
 			ditherShift_(ditherShift){
 
@@ -22,7 +22,7 @@ public:
 		initSineRom();
 	}
 
-	inline void fillBuffer(outType* sine, outType* cosine, unsigned int numSamples){
+	inline void fillBuffer(outType* sine, outType* cosine, unsigned int numSamples, unsigned int inc = 1){
 		for(unsigned int i=0; i<numSamples; i++){
 			phaseAccType phase = acc_ + phase_;
 
@@ -35,19 +35,27 @@ public:
 
 			if(sine){
 				*sine = getValueSin(phase);
-				sine++;
+				sine+=inc;
 			}
 			if(cosine){
 				*cosine = getValueCos(phase);
-				cosine++;
+				cosine+=inc;
 			}
 
 			acc_ += increment_;
 		}
 	}
 
+	inline void fillBuffer(std::complex<outType>* out, unsigned int numSamples){
+		fillBuffer((outType*)out+1, ((outType*)out), numSamples, 2);
+	}
+
 	inline void setIncrement(phaseAccType increment){
 		increment_ = increment;
+	}
+
+	inline void clearAcc(){
+		acc_ = 0;
 	}
 
 	inline void setPhase(phaseAccType phase){
@@ -55,18 +63,18 @@ public:
 	}
 
 	inline phaseAccType frequencyToIncrement(float freq){
-		float t = freq/((float)sampleRate_);
-		return t * (1UL<<(sizeof(phaseAccType)*8));
+		float t = freq/sampleRate_;
+		return t * (1ULL<<(sizeof(phaseAccType)*8));
 	}
 
 private:
-	unsigned int sampleRate_;
+	float sampleRate_;
 
 	phaseAccType acc_ = 0;
 	phaseAccType phase_ = 0;
 	phaseAccType increment_ = 0;
 
-	static const int sineRomSize = (1<<(phaseBits-2)) + 1;
+	static const int sineRomSize = (1ULL<<(phaseBits-2)) + 1;
 
 	void initSineRom(){
 		if(sineRomDone_.load(std::memory_order_acquire)) {
@@ -129,9 +137,9 @@ private:
     static std::atomic<bool> sineRomDone_;
 };
 
-template <typename outType, typename phaseAccType, int gain, int phaseBits> std::atomic<bool> NCOTable<outType, phaseAccType, gain, phaseBits>::sineRomDone_ (false);
-template <typename outType, typename phaseAccType, int gain, int phaseBits> std::atomic_flag NCOTable<outType, phaseAccType, gain, phaseBits>::sineRomFirst_;
-template <typename outType, typename phaseAccType, int gain, int phaseBits> outType NCOTable<outType, phaseAccType, gain, phaseBits>::sineRom_[sineRomSize ];
+template <int phaseBits, typename outType, typename phaseAccType, int gain> std::atomic<bool> NCOTable<phaseBits, outType, phaseAccType, gain>::sineRomDone_ (false);
+template <int phaseBits, typename outType, typename phaseAccType, int gain> std::atomic_flag NCOTable<phaseBits, outType, phaseAccType, gain>::sineRomFirst_;
+template <int phaseBits, typename outType, typename phaseAccType, int gain> outType NCOTable<phaseBits, outType, phaseAccType, gain>::sineRom_[sineRomSize ];
 
 }
 

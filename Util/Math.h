@@ -1,14 +1,10 @@
-#include "Downsampler.h"
+#ifndef FILTERPP_UTIL_MATH_H_
+#define FILTERPP_UTIL_MATH_H_
 
-#include <iostream>
-
-namespace Filter
-{
-namespace Resampler
-{
+namespace Util {
 
 /* This will be in std::numeric in C++17 :) */
-int gcd(unsigned int v1, unsigned int v2)
+template <typename T> T gcd(T v1, T v2)
 {
     while (v2) {
         int tmp = v2;
@@ -19,4 +15,6 @@ int gcd(unsigned int v1, unsigned int v2)
 }
 
 }
-} /* namespace Filter */
+
+
+#endif /* FILTERPP_UTIL_MATH_H_ */

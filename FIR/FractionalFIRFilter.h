@@ -9,28 +9,26 @@ namespace Filter
 namespace FIR
 {
 
-template <typename tapType, typename inType, typename outType> class FrationalFIR
+template <typename tapType, typename inType, typename outType> class FractionalFIR
 {
 public:
-    FrationalFIR():
-        taps_(
-    {
-        1.0f
-    }),
-    rateI_(1),
-    rateD_(1) {}
+	FractionalFIR(){
 
-    FrationalFIR(std::vector<tapType> taps, unsigned int rateI = 1, float rateD = 1.0f):
+	}
+
+    FractionalFIR(std::shared_ptr<std::vector<tapType>> taps, bool interpolate = true, unsigned int rateI = 1, float rateD = 1.0f):
         taps_(taps),
+		interpolate_(interpolate),
         rateI_(rateI),
         rateD_(rateD)
     {
 
-        /* Zero pad tabs_ */
-        unsigned int extraTaps = (taps_.size() % rateI);
-        taps_.resize(taps_.size() + extraTaps);
+    	/* Check tabs */
+    	if(taps->size() % rateI){
+			throw std::runtime_error("Taps not correctly padded");
+		}
 
-        delayLine_ = std::vector<inType>(taps_.size() / rateI);
+        reset();
     }
 
     void setDecimationFactor(float rateD)
@@ -38,66 +36,110 @@ public:
         rateD_ = rateD;
     }
 
-    unsigned int filter(inType* samplesIn, unsigned int numSamples, outType* samplesOut)
+    /*
+     * This function allows resetting the filter phase, reducing computational load
+     * if decimation is integer.
+     */
+    void resetPhase(){
+    	outIndex_ = std::floor(outIndex_);
+    }
+
+    size_t filter(inType* samplesIn, size_t numSamples, outType* samplesOut, unsigned int incIn = 1, unsigned int incOut = 1)
     {
-        unsigned int numOut = 0;
+    	size_t numOut = 0;
+    	size_t cntIn = 0;
+        size_t cntOut = 0;
 
-        for(unsigned int i=0; i<numSamples; i++) {
-            delayLine_[delayIndex_] = samplesIn[i];
-
-            while(outIndex_ < rateI_) {
-                /* Interpolate between two polyphase taps */
-                float o1 = calcPolyphase(0);
-                float o2 = calcPolyphase(1);
-
-                float remainder = outIndex_ - (int)outIndex_;
-
-                float o = remainder * o2 + (1-remainder) * o1;
-
-                outIndex_ = outIndex_ + rateD_;
-                samplesOut[numOut] = o;
-                numOut++;
-            }
-
-            outIndex_ = outIndex_ - rateI_;
-
-            delayIndex_ ++;
-            if(delayIndex_ >= delayLine_.size()) {
-                delayIndex_ = 0;
-            }
+        if(!taps_){
+        	return 0;
         }
+
+       // return numSamples*rateI_/rateD_;
+
+        bool doInterpolate = interpolate_ && outIndex_ != std::floor(outIndex_);
+
+		for(unsigned int i=0; i<numSamples; i++) {
+			delayLine_[delayIndex_] = samplesIn[cntIn];
+			cntIn += incIn;
+
+			while(outIndex_ < rateI_) {
+				/* Interpolate between two polyphase taps */
+				float o = calcPolyphase(0);
+
+				if(doInterpolate){
+					//TODO: Check if this is fully correct, I don't use it...
+					float o2 = calcPolyphase(1);
+
+					float remainder = outIndex_ - std::floor(outIndex_);
+					o = remainder * o2 + (1-remainder) * o;
+				}
+
+				outIndex_ = outIndex_ + rateD_;
+				samplesOut[cntOut] = o;
+				cntOut += incOut;
+
+				numOut++;
+			}
+
+			outIndex_ = outIndex_ - rateI_;
+
+			if(delayIndex_){
+				delayIndex_ --;
+			}else{
+				delayIndex_ = delayLine_.size() - 1;
+			}
+		}
 
         return numOut;
     }
 
+    void initDelayLine(inType value){
+     	for(unsigned int j=0; j<delayLine_.size(); j++) {
+     		delayLine_[j] = value;
+     	}
+    }
+
+    void reset(){
+		outIndex_ = 0;
+		delayLine_ = std::vector<inType>(taps_->size() / rateI_ / 2);
+		delayIndex_ = delayLine_.size() - 1;
+    }
+
 private:
-    inline inType calcPolyphase(unsigned int offset)
+    inline outType calcPolyphase(unsigned int offset)
     {
-        unsigned int fIndex = delayIndex_;
+        unsigned int fIndex = delayIndex_ + 1;
         unsigned int outIndex = outIndex_;
-        inType o = 0;
 
         outIndex += offset;
-        if(outIndex >= rateI_) {
-            outIndex = 0;
+        if(outIndex >= rateI_){
+        	outIndex -= rateI_;
+
+        	/* Use the next sample */
+        	fIndex--;
         }
 
-        for(unsigned int j=0; j<delayLine_.size(); j++) {
-            o = o + delayLine_[fIndex]*taps_[outIndex + rateI_ * j];
+        auto end = delayLine_.size();
+        auto tapOffset = end - fIndex + 2*outIndex*end;
 
-            if(!fIndex) {
-                fIndex = delayLine_.size() - 1;
-            } else {
-                fIndex--;
-            }
-        }
+		auto taps = taps_->data() + tapOffset;
+		auto delayLine = delayLine_.data();
+		auto o = MAC(0, delayLine, taps, end);
 
         return o;
     }
 
-    std::vector<tapType> taps_;
-    unsigned int rateI_;
-    float rateD_;
+    inline outType MAC(outType o, inType* a, tapType* b, unsigned int end){
+		for(unsigned int j=0; j<end; j++) {
+			o = o + a[j]*b[j];
+		}
+    	return o;
+    }
+
+    std::shared_ptr<std::vector<tapType>> taps_;
+    bool interpolate_ = true;
+    unsigned int rateI_ = 1;
+    float rateD_ = 1;
     std::vector<inType> delayLine_;
 
     unsigned int delayIndex_ = 0;
