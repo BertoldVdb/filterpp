@@ -54,10 +54,6 @@ public:
         	return 0;
         }
 
-       // return numSamples*rateI_/rateD_;
-
-        bool doInterpolate = interpolate_ && outIndex_ != std::floor(outIndex_);
-
 		for(unsigned int i=0; i<numSamples; i++) {
 			delayLine_[delayIndex_] = samplesIn[cntIn];
 			cntIn += incIn;
@@ -65,6 +61,8 @@ public:
 			while(outIndex_ < rateI_) {
 				/* Interpolate between two polyphase taps */
 				float o = calcPolyphase(0);
+
+		        bool doInterpolate = interpolate_ && outIndex_ != std::floor(outIndex_);
 
 				if(doInterpolate){
 					//TODO: Check if this is fully correct, I don't use it...
