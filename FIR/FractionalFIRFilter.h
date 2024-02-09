@@ -3,22 +3,20 @@
 
 #include <vector>
 #include <iostream>
+#include <cmath>
 
 namespace Filter
 {
 namespace FIR
 {
 
-template <typename tapType, typename inType, typename outType> class FractionalFIR
+template <typename tapType, typename inType, typename outType, bool interpolate = false> class FractionalFIR
 {
 public:
-	FractionalFIR(){
+	FractionalFIR(){}
 
-	}
-
-    FractionalFIR(std::shared_ptr<std::vector<tapType>> taps, bool interpolate = true, unsigned int rateI = 1, float rateD = 1.0f):
+    FractionalFIR(std::shared_ptr<std::vector<tapType>> taps, unsigned int rateI = 1, float rateD = 1.0f):
         taps_(taps),
-		interpolate_(interpolate),
         rateI_(rateI),
         rateD_(rateD)
     {
@@ -60,16 +58,16 @@ public:
 
 			while(outIndex_ < rateI_) {
 				/* Interpolate between two polyphase taps */
-				float o = calcPolyphase(0);
+				outType o = calcPolyphase(0);
 
-		        bool doInterpolate = interpolate_ && outIndex_ != std::floor(outIndex_);
+				if(interpolate){
+					if(outIndex_ != std::floor(outIndex_)){
+						//TODO: Check if this is fully correct, I don't use it...
+						outType o2 = calcPolyphase(1);
 
-				if(doInterpolate){
-					//TODO: Check if this is fully correct, I don't use it...
-					float o2 = calcPolyphase(1);
-
-					float remainder = outIndex_ - std::floor(outIndex_);
-					o = remainder * o2 + (1-remainder) * o;
+						tapType remainder = outIndex_ - std::floor(outIndex_);
+						o = remainder * o2 + (1-remainder) * o;
+					}
 				}
 
 				outIndex_ = outIndex_ + rateD_;
@@ -118,7 +116,10 @@ private:
         }
 
         auto end = delayLine_.size();
-        auto tapOffset = end - fIndex + 2*outIndex*end;
+        auto tapOffset = end - fIndex + 2*outIndex*end + 1;
+        if(tapOffset < 0 || tapOffset >= taps_->size()){
+        	std::cout << "Tapoffset out fo range" << std::endl; //TODO: make assert
+        }
 
 		auto taps = taps_->data() + tapOffset;
 		auto delayLine = delayLine_.data();
@@ -135,7 +136,6 @@ private:
     }
 
     std::shared_ptr<std::vector<tapType>> taps_;
-    bool interpolate_ = true;
     unsigned int rateI_ = 1;
     float rateD_ = 1;
     std::vector<inType> delayLine_;

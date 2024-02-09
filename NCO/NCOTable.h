@@ -6,6 +6,7 @@
 #include <random>
 #include <atomic>
 #include <thread>
+#include <complex>
 
 namespace NCO {
 
@@ -101,7 +102,6 @@ private:
 		x ^= x << 5;
 		return x;
 	}
-
 
 	inline outType getValueSin(phaseAccType phase){
 		return getRom(phase);

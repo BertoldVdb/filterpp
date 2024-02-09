@@ -26,11 +26,10 @@ std::vector<double> buildFIRFilter(double fc,
 std::vector<double> buildFIRGaussian(unsigned int bits, unsigned int oversampling, double BT);
 
 template <typename T> std::shared_ptr<std::vector<T>> convertTapsForFilter(std::vector<double> in, bool padFront, unsigned int rateI = 1, double gain = 1.0){
-    /* Zero pad tabs, avoiding overread */
-    unsigned int extraTaps = rateI - (in.size() % rateI);
-    if(extraTaps){
-    	in.resize(in.size() + extraTaps);
-    }
+	/* Pad taps with zeros */
+	unsigned int i;
+	for(i=0; i < in.size(); i+=rateI){}
+	in.resize(i);
 
 	/* Also add rateI zeros upfront to we can interpolate into the 'future' */
 	auto out = std::make_shared<std::vector<T>>(((padFront?rateI:0) + in.size()) * 2);
